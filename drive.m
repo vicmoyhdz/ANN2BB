@@ -1,7 +1,7 @@
 %% TRAINING ANN TO PREDICT SHORT-PERIOD SA FROM LONG-PERIOD AND SCALAR METADATA
 % Victor M. Hernández-Aguirre (victorh@hi.is)
 % University of Iceland - Politecnico di Milano
-% January 2025. Updated January 2026
+% January 2025. Updated May 2026
 
 clc
 clear
@@ -18,8 +18,8 @@ dbn_name2 = 'DATABASE_TL'; %Database for transfer learning (TL). Put the same if
 %The data sets should be located inside subfolder database
 
 % DEFINE THE NUMBER OF NETS TO BE TRAINED
-num_nets = 1; %number of individual nets
-n_LoopsANN = 1; %number of trained nets before choosing the best one
+num_nets = 5; %Number of individual nets. We use 5.
+n_LoopsANN = 1; %Number of trained nets before choosing the best one (for each individual net)
 add_distance = 'True';
 add_m = 'True';
 add_lndistance = 'True';
@@ -37,7 +37,7 @@ separate_regions = 'True';
 ann.trn.nr = 1; 
 % corner period
 TnC = [1];
-% direction (h12v=Three-components;ud=vertical;h=rotational-invariant h_inv)
+% direction (h12v=Three-components;ud=vertical;gh=geometric-mean of horizontal components)
 cp  = {'h12v'};
 nnr = 1; %scaling factor N1=nnr*No. input periods, N2=3*nnr*No. output periods
 %;vTn = Vector with the periods at which the spectral accelerations of the

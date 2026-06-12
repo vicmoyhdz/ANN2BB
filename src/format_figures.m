@@ -1,6 +1,3 @@
-%==== format figures
-
-
 function format_figures(hax)
     
     if nargin==0

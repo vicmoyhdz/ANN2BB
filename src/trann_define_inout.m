@@ -1,5 +1,3 @@
-
-
 function [varargout] = trann_define_inout(varargin)
     
     TnC = varargin{1};

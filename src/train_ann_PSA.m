@@ -1,7 +1,7 @@
 %% TRAINING ANN TO PREDICT SHORT-PERIOD SA FROM LONG-PERIOD AND SCALAR METADATA
-% By Victor M. Hernández-Aguirre (victorh@hi.is) 
+% By Victor M. Hernández-Aguirre (victorh@hi.is)
 % University of Iceland - Politecnico di Milano
-% January 2025. Updated January 2026
+% January 2025. Updated May 2026
 function train_ann_PSA(varargin)
 %% *SET-UP*
 wd  = varargin{1};
@@ -33,6 +33,7 @@ db.nr  = size(db.DATABASE,2);
 db.vTn = varargin{16};
 db.nT  = numel(db.vTn);
 all_periods = varargin{17};
+db.EventID = [db.DATABASE.event_name]';
 
 % define input/target natural periods
 % all_periods=[0,0.05,0.07,(0.1:0.05:0.5),0.6,0.7,0.75,0.8,0.9,1.0:0.2:2.0,(2.5:0.5:5)];
@@ -91,7 +92,7 @@ switch ann.cp
         % HORIZONTAL COMPONENT 2
     case {'h2'}
         for j_ = 1:db.nr
-            PSA(j_,:) = db.DATABASE(j_).psa_h2(:)';
+            PSA_1(j_,:) = db.DATABASE(j_).psa_h2(:)';
         end
         if strcmp(TransferLearning,'True')
             for j_ = 1:db2.nr
@@ -297,512 +298,66 @@ if ~strcmp(TransferLearning,'True')
     db2=db; %not used but needed
 end
 
+%For loss function including "hazard" weights:
+M0 = 6.0;      % magnitude threshold
+R0 = 20;       % km, near-source threshold
+aM = 2.5;      % sharpness of magnitude transition
+aR = 0.2;     % sharpness of distance transition
+beta = 5.0;    % max extra weight; max weight approx 1 + beta
+gamma = 0.3;   % far-field magnitude contribution, 0 to 1
+
+Mw_ = [db.DATABASE.Mw];
+R_  = [db.DATABASE.Rjb];
+% Smooth components
+HM = 1 ./ (1 + exp(-aM*(Mw_ - M0)));
+HR = 1 ./ (1 + exp(-aR*(R0 - R_)));
+H = gamma*HM + (1-gamma)*(HM .* HR);
+
+wRecTrain = 1 + beta*H;
+wRecTrain = wRecTrain / mean(wRecTrain);
+
 for i_=1:dsg.ntr
     % Creating ANN architecture based on input variables
-    [dsg,layers,idx2] = ANN_architecture(ann,db.nr,inp.nT,tar.nT,dsg,TransferLearning,add_distance,add_m,add_lndistance,add_vs30,n_classes,n_fm,n_rg,add_depth,ann.cp,db2.nr);
+    [dsg,layers,idx2] = ANN_architecture(ann,db.nr,inp.nT,tar.nT,dsg,TransferLearning,add_distance,add_m,add_lndistance,add_vs30,n_classes,n_fm,n_rg,add_depth,ann.cp,db.EventID,db2.nr);
 
     fprintf('ANN %u/%u: \n',i_,dsg.ntr);
 
     NNs{i_}.idx=dsg.idx;
     if strcmp(TransferLearning,'True')
-     NNs{i_}.idx_TL=idx2;
+        NNs{i_}.idx_TL=idx2;
     end
 
-    %% Saving INPUTS/TARGETS as datastore format needed for training
-    if strcmp(ann.cp,'h12v')
-        if index_extra>0 && n_classes>0 && n_fm>0 && n_rg>0
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)',inp.DATABASE_2(:,dsg.idx.trn)',inp.DATABASE_5(:,dsg.idx.trn)',inp.DATABASE_3(:,dsg.idx.trn)',inp.DATABASE_4(:,dsg.idx.trn)',inp.DATABASE_6(:,dsg.idx.trn)',inp.DATABASE_7(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)',tar.DATABASE_2(:,dsg.idx.trn)',tar.DATABASE_3(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)',inp.DATABASE_2(:,dsg.idx.vld)',inp.DATABASE_5(:,dsg.idx.vld)',inp.DATABASE_3(:,dsg.idx.vld)',inp.DATABASE_4(:,dsg.idx.vld)',inp.DATABASE_6(:,dsg.idx.vld)',inp.DATABASE_7(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)',tar.DATABASE_2(:,dsg.idx.vld)',tar.DATABASE_3(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)',inp.DATABASE_2(:,dsg.idx.tst)',inp.DATABASE_5(:,dsg.idx.tst)',inp.DATABASE_3(:,dsg.idx.tst)',inp.DATABASE_4(:,dsg.idx.tst)',inp.DATABASE_6(:,dsg.idx.tst)',inp.DATABASE_7(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)',tar.DATABASE_2(:,dsg.idx.tst)',tar.DATABASE_3(:,dsg.idx.tst)'};
+    %% Preparing INPUTS/TARGETS in datastore format needed for trainnet
 
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsX1Trn_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.trn)');
-            dsX1Trn_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.trn)');
-            dsX1Trn_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.trn)');
-            dsX1Trn_4 = arrayDatastore(inp.DATABASE_4(:,dsg.idx.trn)');
-            dsX1Trn_6 = arrayDatastore(inp.DATABASE_6(:,dsg.idx.trn)');
-            dsX1Trn_7 = arrayDatastore(inp.DATABASE_7(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsT1Trn_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.trn)');
-            dsT1Trn_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsX1Trn_2,dsX1Trn_5,dsX1Trn_3,dsX1Trn_4,dsX1Trn_6,dsX1Trn_7,dsT1Trn_1,dsT1Trn_2,dsT1Trn_3);
-
-            dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-            dsX1vld_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.vld)');
-            dsX1vld_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.vld)');
-            dsX1vld_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.vld)');
-            dsX1vld_4 = arrayDatastore(inp.DATABASE_4(:,dsg.idx.vld)');
-            dsX1vld_6 = arrayDatastore(inp.DATABASE_6(:,dsg.idx.vld)');
-            dsX1vld_7 = arrayDatastore(inp.DATABASE_7(:,dsg.idx.vld)');
-            dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-            dsT1vld_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.vld)');
-            dsT1vld_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.vld)');
-            dsVld1= combine(dsX1vld_1,dsX1vld_2,dsX1vld_5,dsX1vld_3,dsX1vld_4,dsX1vld_6,dsX1vld_7,dsT1vld_1,dsT1vld_2,dsT1vld_3);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)',inp2.DATABASE_2(:,idx2.trn)',inp2.DATABASE_5(:,idx2.trn)',inp2.DATABASE_3(:,idx2.trn)',inp2.DATABASE_4(:,idx2.trn)',inp2.DATABASE_6(:,idx2.trn)',inp2.DATABASE_7(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)',tar2.DATABASE_2(:,idx2.trn)',tar2.DATABASE_3(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)',inp2.DATABASE_2(:,idx2.vld)',inp2.DATABASE_5(:,idx2.vld)',inp2.DATABASE_3(:,idx2.vld)',inp2.DATABASE_4(:,idx2.vld)',inp2.DATABASE_6(:,idx2.vld)',inp2.DATABASE_7(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)',tar2.DATABASE_2(:,idx2.vld)',tar2.DATABASE_3(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)',inp2.DATABASE_2(:,idx2.tst)',inp2.DATABASE_5(:,idx2.tst)',inp2.DATABASE_3(:,idx2.tst)',inp2.DATABASE_4(:,idx2.tst)',inp2.DATABASE_6(:,idx2.tst)',inp2.DATABASE_7(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)',tar2.DATABASE_2(:,idx2.tst)',tar2.DATABASE_3(:,idx2.tst)'};
-
-
-                dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-                dsX2Trn_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.trn)');
-                dsX2Trn_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.trn)');
-                dsX2Trn_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.trn)');
-                dsX2Trn_4 = arrayDatastore(inp2.DATABASE_4(:,idx2.trn)');
-                dsX2Trn_6 = arrayDatastore(inp2.DATABASE_6(:,idx2.trn)');
-                dsX2Trn_7 = arrayDatastore(inp2.DATABASE_7(:,idx2.trn)');
-                dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-                dsT2Trn_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.trn)');
-                dsT2Trn_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.trn)');
-                dsTrn2 = combine(dsX2Trn_1,dsX2Trn_2,dsX2Trn_5,dsX2Trn_3,dsX2Trn_4,dsX2Trn_6,dsX2Trn_7,dsT2Trn_1,dsT2Trn_2,dsT2Trn_3);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsX2vld_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.vld)');
-                dsX2vld_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.vld)');
-                dsX2vld_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.vld)');
-                dsX2vld_4 = arrayDatastore(inp2.DATABASE_4(:,idx2.vld)');
-                dsX2vld_6 = arrayDatastore(inp2.DATABASE_6(:,idx2.vld)');
-                dsX2vld_7 = arrayDatastore(inp2.DATABASE_7(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsT2vld_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.vld)');
-                dsT2vld_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsX2vld_2,dsX2vld_5,dsX2vld_3,dsX2vld_4,dsX2vld_6,dsX2vld_7,dsT2vld_1,dsT2vld_2,dsT2vld_3);
-            end
-
-        elseif index_extra>0 && n_classes>0 && n_fm>0
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)',inp.DATABASE_2(:,dsg.idx.trn)',inp.DATABASE_5(:,dsg.idx.trn)',inp.DATABASE_3(:,dsg.idx.trn)',inp.DATABASE_4(:,dsg.idx.trn)',inp.DATABASE_6(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)',tar.DATABASE_2(:,dsg.idx.trn)',tar.DATABASE_3(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)',inp.DATABASE_2(:,dsg.idx.vld)',inp.DATABASE_5(:,dsg.idx.vld)',inp.DATABASE_3(:,dsg.idx.vld)',inp.DATABASE_4(:,dsg.idx.vld)',inp.DATABASE_6(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)',tar.DATABASE_2(:,dsg.idx.vld)',tar.DATABASE_3(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)',inp.DATABASE_2(:,dsg.idx.tst)',inp.DATABASE_5(:,dsg.idx.tst)',inp.DATABASE_3(:,dsg.idx.tst)',inp.DATABASE_4(:,dsg.idx.tst)',inp.DATABASE_6(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)',tar.DATABASE_2(:,dsg.idx.tst)',tar.DATABASE_3(:,dsg.idx.tst)'};
-
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsX1Trn_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.trn)');
-            dsX1Trn_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.trn)');
-            dsX1Trn_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.trn)');
-            dsX1Trn_4 = arrayDatastore(inp.DATABASE_4(:,dsg.idx.trn)');
-            dsX1Trn_6 = arrayDatastore(inp.DATABASE_6(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsT1Trn_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.trn)');
-            dsT1Trn_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsX1Trn_2,dsX1Trn_5,dsX1Trn_3,dsX1Trn_4,dsX1Trn_6,dsT1Trn_1,dsT1Trn_2,dsT1Trn_3);
-
-            dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-            dsX1vld_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.vld)');
-            dsX1vld_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.vld)');
-            dsX1vld_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.vld)');
-            dsX1vld_4 = arrayDatastore(inp.DATABASE_4(:,dsg.idx.vld)');
-            dsX1vld_6 = arrayDatastore(inp.DATABASE_6(:,dsg.idx.vld)');
-            dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-            dsT1vld_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.vld)');
-            dsT1vld_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.vld)');
-            dsVld1= combine(dsX1vld_1,dsX1vld_2,dsX1vld_5,dsX1vld_3,dsX1vld_4,dsX1vld_6,dsT1vld_1,dsT1vld_2,dsT1vld_3);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)',inp2.DATABASE_2(:,idx2.trn)',inp2.DATABASE_5(:,idx2.trn)',inp2.DATABASE_3(:,idx2.trn)',inp2.DATABASE_4(:,idx2.trn)',inp2.DATABASE_6(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)',tar2.DATABASE_2(:,idx2.trn)',tar2.DATABASE_3(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)',inp2.DATABASE_2(:,idx2.vld)',inp2.DATABASE_5(:,idx2.vld)',inp2.DATABASE_3(:,idx2.vld)',inp2.DATABASE_4(:,idx2.vld)',inp2.DATABASE_6(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)',tar2.DATABASE_2(:,idx2.vld)',tar2.DATABASE_3(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)',inp2.DATABASE_2(:,idx2.tst)',inp2.DATABASE_5(:,idx2.tst)',inp2.DATABASE_3(:,idx2.tst)',inp2.DATABASE_4(:,idx2.tst)',inp2.DATABASE_6(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)',tar2.DATABASE_2(:,idx2.tst)',tar2.DATABASE_3(:,idx2.tst)'};
-
-                dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-                dsX2Trn_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.trn)');
-                dsX2Trn_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.trn)');
-                dsX2Trn_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.trn)');
-                dsX2Trn_4 = arrayDatastore(inp2.DATABASE_4(:,idx2.trn)');
-                dsX2Trn_6 = arrayDatastore(inp2.DATABASE_6(:,idx2.trn)');
-                dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-                dsT2Trn_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.trn)');
-                dsT2Trn_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.trn)');
-                dsTrn2 = combine(dsX2Trn_1,dsX2Trn_2,dsX2Trn_5,dsX2Trn_3,dsX2Trn_4,dsX2Trn_6,dsT2Trn_1,dsT2Trn_2,dsT2Trn_3);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsX2vld_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.vld)');
-                dsX2vld_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.vld)');
-                dsX2vld_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.vld)');
-                dsX2vld_4 = arrayDatastore(inp2.DATABASE_4(:,idx2.vld)');
-                dsX2vld_6 = arrayDatastore(inp2.DATABASE_6(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsT2vld_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.vld)');
-                dsT2vld_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsX2vld_2,dsX2vld_5,dsX2vld_3,dsX2vld_4,dsX2vld_6,dsT2vld_1,dsT2vld_2,dsT2vld_3);
-            end
-
-        elseif index_extra>0 && n_rg>0 && n_fm>0
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)',inp.DATABASE_2(:,dsg.idx.trn)',inp.DATABASE_5(:,dsg.idx.trn)',inp.DATABASE_3(:,dsg.idx.trn)',inp.DATABASE_6(:,dsg.idx.trn)',inp.DATABASE_7(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)',tar.DATABASE_2(:,dsg.idx.trn)',tar.DATABASE_3(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)',inp.DATABASE_2(:,dsg.idx.vld)',inp.DATABASE_5(:,dsg.idx.vld)',inp.DATABASE_3(:,dsg.idx.vld)',inp.DATABASE_6(:,dsg.idx.vld)',inp.DATABASE_7(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)',tar.DATABASE_2(:,dsg.idx.vld)',tar.DATABASE_3(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)',inp.DATABASE_2(:,dsg.idx.tst)',inp.DATABASE_5(:,dsg.idx.tst)',inp.DATABASE_3(:,dsg.idx.tst)',inp.DATABASE_6(:,dsg.idx.tst)',inp.DATABASE_7(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)',tar.DATABASE_2(:,dsg.idx.tst)',tar.DATABASE_3(:,dsg.idx.tst)'};
-
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsX1Trn_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.trn)');
-            dsX1Trn_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.trn)');
-            dsX1Trn_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.trn)');
-            dsX1Trn_7 = arrayDatastore(inp.DATABASE_7(:,dsg.idx.trn)');
-            dsX1Trn_6 = arrayDatastore(inp.DATABASE_6(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsT1Trn_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.trn)');
-            dsT1Trn_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsX1Trn_2,dsX1Trn_5,dsX1Trn_3,dsX1Trn_6,dsX1Trn_7,dsT1Trn_1,dsT1Trn_2,dsT1Trn_3);
-
-            dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-            dsX1vld_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.vld)');
-            dsX1vld_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.vld)');
-            dsX1vld_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.vld)');
-            dsX1vld_7 = arrayDatastore(inp.DATABASE_7(:,dsg.idx.vld)');
-            dsX1vld_6 = arrayDatastore(inp.DATABASE_6(:,dsg.idx.vld)');
-            dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-            dsT1vld_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.vld)');
-            dsT1vld_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.vld)');
-            dsVld1= combine(dsX1vld_1,dsX1vld_2,dsX1vld_5,dsX1vld_3,dsX1vld_6,dsX1vld_7,dsT1vld_1,dsT1vld_2,dsT1vld_3);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)',inp2.DATABASE_2(:,idx2.trn)',inp2.DATABASE_5(:,idx2.trn)',inp2.DATABASE_3(:,idx2.trn)',inp2.DATABASE_6(:,idx2.trn)',inp2.DATABASE_7(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)',tar2.DATABASE_2(:,idx2.trn)',tar2.DATABASE_3(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)',inp2.DATABASE_2(:,idx2.vld)',inp2.DATABASE_5(:,idx2.vld)',inp2.DATABASE_3(:,idx2.vld)',inp2.DATABASE_6(:,idx2.vld)',inp2.DATABASE_7(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)',tar2.DATABASE_2(:,idx2.vld)',tar2.DATABASE_3(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)',inp2.DATABASE_2(:,idx2.tst)',inp2.DATABASE_5(:,idx2.tst)',inp2.DATABASE_3(:,idx2.tst)',inp2.DATABASE_6(:,idx2.tst)',inp2.DATABASE_7(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)',tar2.DATABASE_2(:,idx2.tst)',tar2.DATABASE_3(:,idx2.tst)'};
-
-                dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-                dsX2Trn_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.trn)');
-                dsX2Trn_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.trn)');
-                dsX2Trn_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.trn)');
-                dsX2Trn_7 = arrayDatastore(inp2.DATABASE_7(:,idx2.trn)');
-                dsX2Trn_6 = arrayDatastore(inp2.DATABASE_6(:,idx2.trn)');
-                dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-                dsT2Trn_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.trn)');
-                dsT2Trn_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.trn)');
-                dsTrn2 = combine(dsX2Trn_1,dsX2Trn_2,dsX2Trn_5,dsX2Trn_3,dsX2Trn_6,dsX2Trn_7,dsT2Trn_1,dsT2Trn_2,dsT2Trn_3);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsX2vld_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.vld)');
-                dsX2vld_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.vld)');
-                dsX2vld_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.vld)');
-                dsX2vld_7 = arrayDatastore(inp2.DATABASE_7(:,idx2.vld)');
-                dsX2vld_6 = arrayDatastore(inp2.DATABASE_6(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsT2vld_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.vld)');
-                dsT2vld_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsX2vld_2,dsX2vld_5,dsX2vld_3,dsX2vld_6,dsX2vld_7,dsT2vld_1,dsT2vld_2,dsT2vld_3);
-            end
-
-        elseif index_extra>0 && n_classes>0
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)',inp.DATABASE_2(:,dsg.idx.trn)',inp.DATABASE_5(:,dsg.idx.trn)',inp.DATABASE_3(:,dsg.idx.trn)',inp.DATABASE_4(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)',tar.DATABASE_2(:,dsg.idx.trn)',tar.DATABASE_3(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)',inp.DATABASE_2(:,dsg.idx.vld)',inp.DATABASE_5(:,dsg.idx.vld)',inp.DATABASE_3(:,dsg.idx.vld)',inp.DATABASE_4(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)',tar.DATABASE_2(:,dsg.idx.vld)',tar.DATABASE_3(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)',inp.DATABASE_2(:,dsg.idx.tst)',inp.DATABASE_5(:,dsg.idx.tst)',inp.DATABASE_3(:,dsg.idx.tst)',inp.DATABASE_4(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)',tar.DATABASE_2(:,dsg.idx.tst)',tar.DATABASE_3(:,dsg.idx.tst)'};
-
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsX1Trn_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.trn)');
-            dsX1Trn_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.trn)');
-            dsX1Trn_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.trn)');
-            dsX1Trn_4 = arrayDatastore(inp.DATABASE_4(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsT1Trn_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.trn)');
-            dsT1Trn_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsX1Trn_2,dsX1Trn_5,dsX1Trn_3,dsX1Trn_4,dsT1Trn_1,dsT1Trn_2,dsT1Trn_3);
-
-            dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-            dsX1vld_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.vld)');
-            dsX1vld_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.vld)');
-            dsX1vld_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.vld)');
-            dsX1vld_4 = arrayDatastore(inp.DATABASE_4(:,dsg.idx.vld)');
-            dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-            dsT1vld_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.vld)');
-            dsT1vld_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.vld)');
-            dsVld1= combine(dsX1vld_1,dsX1vld_2,dsX1vld_5,dsX1vld_3,dsX1vld_4,dsT1vld_1,dsT1vld_2,dsT1vld_3);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)',inp2.DATABASE_2(:,idx2.trn)',inp2.DATABASE_5(:,idx2.trn)',inp2.DATABASE_3(:,idx2.trn)',inp2.DATABASE_4(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)',tar2.DATABASE_2(:,idx2.trn)',tar2.DATABASE_3(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)',inp2.DATABASE_2(:,idx2.vld)',inp2.DATABASE_5(:,idx2.vld)',inp2.DATABASE_3(:,idx2.vld)',inp2.DATABASE_4(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)',tar2.DATABASE_2(:,idx2.vld)',tar2.DATABASE_3(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)',inp2.DATABASE_2(:,idx2.tst)',inp2.DATABASE_5(:,idx2.tst)',inp2.DATABASE_3(:,idx2.tst)',inp2.DATABASE_4(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)',tar2.DATABASE_2(:,idx2.tst)',tar2.DATABASE_3(:,idx2.tst)'};
-
-                dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-                dsX2Trn_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.trn)');
-                dsX2Trn_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.trn)');
-                dsX2Trn_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.trn)');
-                dsX2Trn_4 = arrayDatastore(inp2.DATABASE_4(:,idx2.trn)');
-                dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-                dsT2Trn_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.trn)');
-                dsT2Trn_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.trn)');
-                dsTrn2 = combine(dsX2Trn_1,dsX2Trn_2,dsX2Trn_5,dsX2Trn_3,dsX2Trn_4,dsT2Trn_1,dsT2Trn_2,dsT2Trn_3);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsX2vld_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.vld)');
-                dsX2vld_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.vld)');
-                dsX2vld_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.vld)');
-                dsX2vld_4 = arrayDatastore(inp2.DATABASE_4(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsT2vld_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.vld)');
-                dsT2vld_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsX2vld_2,dsX2vld_5,dsX2vld_3,dsX2vld_4,dsT2vld_1,dsT2vld_2,dsT2vld_3);
-            end
-
-        elseif (index_extra>0) && (n_classes==0)
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)',inp.DATABASE_2(:,dsg.idx.trn)',inp.DATABASE_5(:,dsg.idx.trn)',inp.DATABASE_3(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)',tar.DATABASE_2(:,dsg.idx.trn)',tar.DATABASE_3(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)',inp.DATABASE_2(:,dsg.idx.vld)',inp.DATABASE_5(:,dsg.idx.vld)',inp.DATABASE_3(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)',tar.DATABASE_2(:,dsg.idx.vld)',tar.DATABASE_3(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)',inp.DATABASE_2(:,dsg.idx.tst)',inp.DATABASE_5(:,dsg.idx.tst)',inp.DATABASE_3(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)',tar.DATABASE_2(:,dsg.idx.tst)',tar.DATABASE_3(:,dsg.idx.tst)'};
-
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsX1Trn_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.trn)');
-            dsX1Trn_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.trn)');
-            dsX1Trn_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsT1Trn_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.trn)');
-            dsT1Trn_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsX1Trn_2,dsX1Trn_5,dsX1Trn_3,dsT1Trn_1,dsT1Trn_2,dsT1Trn_3);
-
-            dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-            dsX1vld_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.vld)');
-            dsX1vld_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.vld)');
-            dsX1vld_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.vld)');
-            dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-            dsT1vld_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.vld)');
-            dsT1vld_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.vld)');
-            dsVld1= combine(dsX1vld_1,dsX1vld_2,dsX1vld_5,dsX1vld_3,dsT1vld_1,dsT1vld_2,dsT1vld_3);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)',inp2.DATABASE_2(:,idx2.trn)',inp2.DATABASE_5(:,idx2.trn)',inp2.DATABASE_3(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)',tar2.DATABASE_2(:,idx2.trn)',tar2.DATABASE_3(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)',inp2.DATABASE_2(:,idx2.vld)',inp2.DATABASE_5(:,idx2.vld)',inp2.DATABASE_3(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)',tar2.DATABASE_2(:,idx2.vld)',tar2.DATABASE_3(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)',inp2.DATABASE_2(:,idx2.tst)',inp2.DATABASE_5(:,idx2.tst)',inp2.DATABASE_3(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)',tar2.DATABASE_2(:,idx2.tst)',tar2.DATABASE_3(:,idx2.tst)'};
-
-                dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-                dsX2Trn_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.trn)');
-                dsX2Trn_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.trn)');
-                dsX2Trn_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.trn)');
-                dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-                dsT2Trn_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.trn)');
-                dsT2Trn_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.trn)');
-                dsTrn2 = combine(dsX2Trn_1,dsX2Trn_2,dsX2Trn_5,dsX2Trn_3,dsT2Trn_1,dsT2Trn_2,dsT2Trn_3);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsX2vld_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.vld)');
-                dsX2vld_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.vld)');
-                dsX2vld_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsT2vld_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.vld)');
-                dsT2vld_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsX2vld_2,dsX2vld_5,dsX2vld_3,dsT2vld_1,dsT2vld_2,dsT2vld_3);
-            end
-
-        else
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)',inp.DATABASE_2(:,dsg.idx.trn)',inp.DATABASE_5(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)',tar.DATABASE_2(:,dsg.idx.trn)',tar.DATABASE_3(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)',inp.DATABASE_2(:,dsg.idx.vld)',inp.DATABASE_5(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)',tar.DATABASE_2(:,dsg.idx.vld)',tar.DATABASE_3(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)',inp.DATABASE_2(:,dsg.idx.tst)',inp.DATABASE_5(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)',tar.DATABASE_2(:,dsg.idx.tst)',tar.DATABASE_3(:,dsg.idx.tst)'};
-
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsX1Trn_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.trn)');
-            dsX1Trn_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsT1Trn_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.trn)');
-            dsT1Trn_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsX1Trn_2,dsX1Trn_5,dsT1Trn_1,dsT1Trn_2,dsT1Trn_3);
-
-            dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-            dsX1vld_2 = arrayDatastore(inp.DATABASE_2(:,dsg.idx.vld)');
-            dsX1vld_5 = arrayDatastore(inp.DATABASE_5(:,dsg.idx.vld)');
-            dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-            dsT1vld_2 = arrayDatastore(tar.DATABASE_2(:,dsg.idx.vld)');
-            dsT1vld_3 = arrayDatastore(tar.DATABASE_3(:,dsg.idx.vld)');
-            dsVld1= combine(dsX1vld_1,dsX1vld_2,dsX1vld_5,dsT1vld_1,dsT1vld_2,dsT1vld_3);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)',inp2.DATABASE_2(:,idx2.trn)',inp2.DATABASE_5(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)',tar2.DATABASE_2(:,idx2.trn)',tar2.DATABASE_3(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)',inp2.DATABASE_2(:,idx2.vld)',inp2.DATABASE_5(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)',tar2.DATABASE_2(:,idx2.vld)',tar2.DATABASE_3(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)',inp2.DATABASE_2(:,idx2.tst)',inp2.DATABASE_5(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)',tar2.DATABASE_2(:,idx2.tst)',tar2.DATABASE_3(:,idx2.tst)'};
-
-                dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-                dsX2Trn_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.trn)');
-                dsX2Trn_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.trn)');
-                dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-                dsT2Trn_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.trn)');
-                dsT2Trn_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.trn)');
-                dsTrn2 = combine(dsX2Trn_1,dsX2Trn_2,dsX2Trn_5,dsT2Trn_1,dsT2Trn_2,dsT2Trn_3);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsX2vld_2 = arrayDatastore(inp2.DATABASE_2(:,idx2.vld)');
-                dsX2vld_5 = arrayDatastore(inp2.DATABASE_5(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsT2vld_2 = arrayDatastore(tar2.DATABASE_2(:,idx2.vld)');
-                dsT2vld_3 = arrayDatastore(tar2.DATABASE_3(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsX2vld_2,dsX2vld_5,dsT2vld_1,dsT2vld_2,dsT2vld_3);
-            end
-        end
-    else %only one component
-
-        if index_extra>0 && n_classes>0
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)',inp.DATABASE_3(:,dsg.idx.trn)',inp.DATABASE_4(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)',inp.DATABASE_3(:,dsg.idx.vld)',inp.DATABASE_4(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)',inp.DATABASE_3(:,dsg.idx.tst)',inp.DATABASE_4(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)'};
-
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsX1Trn_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.trn)');
-            dsX1Trn_4 = arrayDatastore(inp.DATABASE_4(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsX1Trn_3,dsX1Trn_4,dsT1Trn_1);
-
-            dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-            dsX1vld_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.vld)');
-            dsX1vld_4 = arrayDatastore(inp.DATABASE_4(:,dsg.idx.vld)');
-            dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-            dsVld1= combine(dsX1vld_1,dsX1vld_3,dsX1vld_4,dsT1vld_1);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)',inp2.DATABASE_3(:,idx2.trn)',inp2.DATABASE_4(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)',inp2.DATABASE_3(:,idx2.vld)',inp2.DATABASE_4(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)',inp2.DATABASE_3(:,idx2.tst)',inp2.DATABASE_4(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)'};
-
-                dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-                dsX2Trn_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.trn)');
-                dsX2Trn_4 = arrayDatastore(inp2.DATABASE_4(:,idx2.trn)');
-                dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-                dsTrn2 = combine(dsX2Trn_1,dsX2Trn_3,dsX2Trn_4,dsT2Trn_1);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsX2vld_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.vld)');
-                dsX2vld_4 = arrayDatastore(inp2.DATABASE_4(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsX2vld_3,dsX2vld_4,dsT2vld_1);
-            end
-
-        elseif (index_extra>0) && (n_classes==0)
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)',inp.DATABASE_3(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)',inp.DATABASE_3(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)',inp.DATABASE_3(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)'};
-
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsX1Trn_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsX1Trn_3,dsT1Trn_1);
-
-            dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-            dsX1vld_3 = arrayDatastore(inp.DATABASE_3(:,dsg.idx.vld)');
-            dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-            dsVld1= combine(dsX1vld_1,dsX1vld_3,dsT1vld_1);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)',inp2.DATABASE_3(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)',inp2.DATABASE_3(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)',inp2.DATABASE_3(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)'};
-
-                dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-                dsX2Trn_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.trn)');
-                dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-                dsTrn2 = combine(dsX2Trn_1,dsX2Trn_3,dsT2Trn_1);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsX2vld_3 = arrayDatastore(inp2.DATABASE_3(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsX2vld_3,dsT2vld_1);
-            end
-
-        else
-            NNs{i_}.inp.trn = {inp.DATABASE_1(:,dsg.idx.trn)'};
-            NNs{i_}.tar.trn = {tar.DATABASE_1(:,dsg.idx.trn)'};
-            NNs{i_}.inp.vld = {inp.DATABASE_1(:,dsg.idx.vld)'};
-            NNs{i_}.tar.vld = {tar.DATABASE_1(:,dsg.idx.vld)'};
-            NNs{i_}.inp.tst = {inp.DATABASE_1(:,dsg.idx.tst)'};
-            NNs{i_}.tar.tst = {tar.DATABASE_1(:,dsg.idx.tst)'};
-
-            dsX1Trn_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.trn)');
-            dsT1Trn_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.trn)');
-            dsTrn1 = combine(dsX1Trn_1,dsT1Trn_1);
-
-            dsX2Trn_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.trn)');
-            dsT2Trn_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.trn)');
-            dsTrn2 = combine(dsX2Trn_1,dsT2Trn_1);
-
-            if strcmp(TransferLearning,'True')
-                NNs{i_}.inp2.trn = {inp2.DATABASE_1(:,idx2.trn)'};
-                NNs{i_}.tar2.trn = {tar2.DATABASE_1(:,idx2.trn)'};
-                NNs{i_}.inp2.vld = {inp2.DATABASE_1(:,idx2.vld)'};
-                NNs{i_}.tar2.vld = {tar2.DATABASE_1(:,idx2.vld)'};
-                NNs{i_}.inp2.tst = {inp2.DATABASE_1(:,idx2.tst)'};
-                NNs{i_}.tar2.tst = {tar2.DATABASE_1(:,idx2.tst)'};
-
-                dsX1vld_1 = arrayDatastore(inp.DATABASE_1(:,dsg.idx.vld)');
-                dsT1vld_1 = arrayDatastore(tar.DATABASE_1(:,dsg.idx.vld)');
-                dsVld1= combine(dsX1vld_1,dsT1vld_1);
-
-                dsX2vld_1 = arrayDatastore(inp2.DATABASE_1(:,idx2.vld)');
-                dsT2vld_1 = arrayDatastore(tar2.DATABASE_1(:,idx2.vld)');
-                dsVld2= combine(dsX2vld_1,dsT2vld_1);
-
-            end
-        end
-    end
+    Preparing_inputs_targets;
 
 
     %% TRAINING ANN
     fprintf('TRAINING...\n');
 
-    % analyzeNetwork(layers)
+% -------- LOSS FUNCTION PARAMETERS: HAZARD-WEIGHTED HUBER + BIAS + SMOOTHNESS --------
 
-    % ----------Defining composite loss function-----------------
-    delta = 0.8;  % in ln units;
-    w=ones(length(tar.vTn),1);w(1)=2; % w(2:4)=0.5;
+delta = 1;  % ln units (for Huber)
+% Period weights
+w = ones(length(tar.vTn),1);
+w(1) = 2;
+w = w/mean(w);
+% Bias weights
+wBias = ones(size(w)); wBias(1) = 2; wBias(2:5) = 3;
+wBias = wBias/mean(wBias);
+% Bias penalty factor
+alpha = 1;
+% Smoothness penalty factor
+lambdaS = 0.01;
 
-    whuber = @(Y,T,w,delta) sum( w .* mean( ...
-        0.5*(abs(Y-T)<=delta).*(Y-T).^2 + ...
-        (abs(Y-T)>delta).*delta.*(abs(Y-T)-0.5*delta), ...
-        2) ) ./ sum(w);
-
-    % Bias penalty: penalize nonzero mean residual per period (weighted)
-    wBias = ones(size(w));
-    wBias(2:5) = 4;  wBias(1)=2;   % e.g., enforce bias more strongly at first periods
-    wBias = wBias/mean(wBias);
-    wbias = @(Y,T,wBias) sum( wBias .* (mean(Y-T,2)).^2 ) / sum(wBias);
-
-    %Total loss
-    alpha = 0.08;
-    loss1 = @(Y,T,w,delta) whuber(Y,T,w,delta) + alpha*wbias(Y,T,wBias);
-
+% Final loss function passed to trainnet
     if strcmp(ann.cp,'h12v')
         lossFcn = @(Y1,Y2,Y3,T1,T2,T3) ( ...
-            0.375*loss1(Y1,T1,w,delta) + 0.375*loss1(Y2,T2,w,delta) + 0.25*loss1(Y3,T3,w,delta));
+            0.375*loss1_smooth_weighted_bias_from_aug(Y1,T1,w,wBias,delta,alpha,lambdaS) + ...
+            0.375*loss1_smooth_weighted_bias_given_w(Y2,T2,T1(end,:),w,wBias,delta,alpha,lambdaS) + ...
+            0.25 *loss1_smooth_weighted_bias_given_w(Y3,T3,T1(end,:),w,wBias,delta,alpha,lambdaS));
     else
-        lossFcn = @(Y1,T1) 1*mse(Y1,T1) ;
+        lossFcn = @(Y1,T1) loss1_smooth_weighted_bias_from_aug(Y1,T1,w,wBias,delta,alpha,lambdaS);
     end
 
     %-------------------- Training------------------------
@@ -813,7 +368,7 @@ for i_=1:dsg.ntr
     options = trainingOptions("adam", ...
         "InitialLearnRate", 5e-4, ...
         "LearnRateSchedule","piecewise", ...
-        "LearnRateDropPeriod", 30, ...
+        "LearnRateDropPeriod", 40, ...
         "LearnRateDropFactor", 0.5, ...
         "MaxEpochs", 115, ...
         "MiniBatchSize", miniBatchSize, ...
@@ -830,11 +385,20 @@ for i_=1:dsg.ntr
     [NNs{i_}.net,NNs{i_}.trs] = trainnet(dsTrn1,layers,lossFcn,options);
     old_net=NNs{i_}.net;
 
-    if strcmp(TransferLearning,'True')
-        %-------- LOSS FUNCTION FOR TL ADDING SMOOTHNESS FACTOR ----------
+    if strcmp(TransferLearning,'True') 
+       
+        whuber = @(Y,T,w,delta) sum( w .* mean( ...
+        0.5*(abs(Y-T)<=delta).*(Y-T).^2 + ...
+        (abs(Y-T)>delta).*delta.*(abs(Y-T)-0.5*delta), ...
+        2) ) ./ sum(w);
+        % Bias penalty: penalize nonzero mean residual per period (weighted)
+        wbias = @(Y,T,wBias) sum( wBias .* (mean(Y-T,2)).^2 ) / sum(wBias);  
+        % Loss whuber+bias
+        alpha = 0.8;
+        loss1 = @(Y,T,w,delta) whuber(Y,T,w,delta) + alpha*wbias(Y,T,wBias);       
+        % Final loss function passed to trainnet
         smooth2 = @(Y) mean( (Y(3:end,:) - 2*Y(2:end-1,:) + Y(1:end-2,:)).^2, "all");
-
-        lambdaS = 1;  %  smoothness factor
+        lambdaS = 0.01;  %  smoothness factor
         loss1_smooth = @(Y,T,w,delta) loss1(Y,T,w,delta) + lambdaS*smooth2(Y);
 
         if strcmp(ann.cp,'h12v')
@@ -848,43 +412,14 @@ for i_=1:dsg.ntr
 
 
         %-------------- TRANSFER LEARNING ---------------------------
-        % Define the layers to freeze for transfer learning
-        % layerName = ["fc_shared1","fc_shared2","output1","output2","output3"];
-        %
-        % layers = freezeNetwork(NNs{i_}.net,LayerNamesToIgnore=layerName);
-        %
-        % miniBatchSize = 20;
-        % numTrain = length(idx2.trn);
-        % valFreq  = ceil(numTrain/miniBatchSize);
-        %
-        % options2 = trainingOptions("adam", ...
-        %     "InitialLearnRate", 5e-4, ...
-        %     "LearnRateSchedule","piecewise", ...
-        %     "LearnRateDropPeriod", 30, ...
-        %     "LearnRateDropFactor", 0.5, ...
-        %     "MaxEpochs", 100, ...
-        %     "MiniBatchSize", miniBatchSize, ...
-        %     "Shuffle", "every-epoch", ...
-        %     "L2Regularization", 1e-4, ...
-        %     "GradientThresholdMethod","l2norm", ...
-        %     "GradientThreshold", 1, ...
-        %     "ValidationData", dsVld2, ...
-        %     "ValidationFrequency", valFreq, ...
-        %     "ValidationPatience", 5, ...
-        %     "OutputNetwork","best-validation-loss", ...
-        %     ..."Plots","training-progress", ...
-        %     "Verbose", false);
-        %
-        % [NNs{i_}.net,NNs{i_}.trs] = trainnet(dsTrn2,layers,lossFcn,options2);
-
         % Matlab's trainnet doesn't accept LS-2P penalty so we use custom training loop:
 
         % ---------------- Custom TL training with LS-2P penalty----------------
         layerName = ["input4","fc_shared1","fc_shared2","output1","output2","output3"]; % layers to update
-        miniBatchSize = 20; % Should be defined according to the size of the TL dataset
+        miniBatchSize = 16; % Should be defined according to the size of the TL dataset
         maxEpochs     = 150;
-        learnRate     = 5e-4;
-        lambdaSP      = 20;
+        learnRate     = 1e-4;
+        lambdaSP      = 30;
         gradThresh    = 1;
         patience      = 8;
 
@@ -893,11 +428,11 @@ for i_=1:dsg.ntr
 
     %% TEST/VALIDATE ANN PERFORMANCE
     NNs{i_} = train_ann_valid(NNs{i_},TransferLearning,index_extra,n_classes,n_fm,n_rg,ann.cp);
-    prf.trn(i_,1) = double(NNs{i_}.prf.trn);
-    prf.vld(i_,1) = double(NNs{i_}.prf.vld);
-    prf.tst(i_,1) = double(NNs{i_}.prf.tst);
-    prf.r(i_,1) = double(NNs{i_}.prf.r);
-    prf.mae(i_,1) = double(NNs{i_}.prf.mae);
+    prf.trn(i_,1) = double(NNs{i_}.prf.trn_rmse);
+    prf.vld(i_,1) = double(NNs{i_}.prf.vld_rmse);
+    prf.tst(i_,1) = double(NNs{i_}.prf.tst_rmse);
+    prf.r(i_,1) = double(NNs{i_}.prf.vld_r);
+    prf.mae(i_,1) = double(NNs{i_}.prf.vld_mae);
 end
 
 %% COMPUTE BEST PERFORMANCE
@@ -916,4 +451,56 @@ end
 saving_net;
 
 return
+end
+
+
+
+
+
+
+function loss = loss1_smooth_weighted_bias_given_w(Y,T,wRec,wPer,wBias,delta,alpha,lambdaS)
+
+    % Y     : [nPeriods x miniBatch]
+    % T     : [nPeriods x miniBatch]
+    % wRec  : [1 x miniBatch]
+    % wPer  : [nPeriods x 1]
+    % wBias : [nPeriods x 1]
+
+    wRec  = reshape(wRec,1,[]);
+    wPer  = reshape(wPer,[],1);
+    wBias = reshape(wBias,[],1);
+
+    R = Y - T;
+    absR = abs(R);
+
+    % ---------------- Huber loss ----------------
+    Lh = 0.5*(absR <= delta).*R.^2 + ...
+         (absR >  delta).*delta.*(absR - 0.5*delta);
+
+    huberLoss = sum(Lh .* wPer .* wRec,"all") ./ ...
+                (sum(wPer) * sum(wRec));
+
+    % ---------------- Bias penalty ----------------
+    meanBias = sum(R .* wRec,2) ./ sum(wRec);
+
+    biasLoss = sum(wBias .* meanBias.^2) ./ sum(wBias);
+
+    % ---------------- Smoothness penalty ----------------
+    smoothLoss = mean( ...
+        (Y(3:end,:) - 2*Y(2:end-1,:) + Y(1:end-2,:)).^2, ...
+        "all");
+
+    % ---------------- Total loss ----------------
+    loss = huberLoss + alpha*biasLoss + lambdaS*smoothLoss;
+
+end
+
+function loss = loss1_smooth_weighted_bias_from_aug(Y,T_aug,wPer,wBias,delta,alpha,lambdaS)
+
+    % Last row of T_aug contains the record/hazard weight
+    T    = T_aug(1:end-1,:);
+    wRec = T_aug(end,:);
+
+    loss = loss1_smooth_weighted_bias_given_w(Y,T,wRec,wPer,wBias,delta,alpha,lambdaS);
+
 end
